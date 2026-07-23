@@ -1,6 +1,18 @@
-brainflow>=5.12.0
+# ⚠️ brainflow 버전을 고정한다. 최신 버전을 쓰지 말 것.
+#
+# brainflow 5.21 부터 BLED112 동글 지원이 deprecated 되었고,
+# 5.22.2 에서는 실제로 동작하지 않는다 (스캔조차 시작하지 못하고
+# "failed to Open Ganglion Device 13" 으로 0초 만에 실패).
+# 5.20.0 에서는 정상적으로 Ganglion 을 찾아 연결된다. (2026-07-23 실측)
+brainflow==5.20.0
+
+# brainflow 5.20.0 은 pkg_resources 를 사용하므로 setuptools 가 필요하다.
+# setuptools 81 부터 pkg_resources 가 제거되었다.
+setuptools<81
+
 numpy>=1.26.0
 scipy>=1.13.0
 pandas>=2.2.0
 matplotlib>=3.9.0
+pyserial>=3.5
 jupyter>=1.0.0

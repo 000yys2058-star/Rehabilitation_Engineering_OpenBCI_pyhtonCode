@@ -63,8 +63,40 @@ CHS = BoardShim.get_eeg_channels(BoardIds.GANGLION_BOARD)    # EEG 행 인덱스
 | `GANGLION_BOARD` (1) | BLED112 동글 + `serial_port` | ✅ **이걸 사용** |
 | `GANGLION_NATIVE_BOARD` (46) | PC 내장 BLE + `mac_address`/`serial_number` | ❌ 내장 BLE 없음 |
 
-`GANGLION_BOARD`는 BrainFlow 5.21+ 에서 **문서상 deprecated**(BLED112 단종 때문)이지만
-**코드는 그대로 살아 있어 정상 동작**한다. 문서에서 안 보인다고 없어진 게 아님.
+### 🔴 brainflow 버전을 5.20.0 으로 고정할 것 (가장 중요)
+
+**최신 brainflow 를 설치하면 연결이 안 된다.** 2026-07-23 실측 결과:
+
+| brainflow | 결과 |
+| --- | --- |
+| **5.20.0** | ✅ **연결 성공** (2.3초), 200Hz 정상 수집 |
+| 5.22.2 | ❌ 0.0초 만에 실패. 스캔조차 시작하지 못함 |
+
+5.22.2 로그:
+```
+[info]  Setting firmware version to 3
+[warning] BoardIds::GANGLION_BOARD uses deprecated BLED112/bglib support
+[info]  mac address is not specified, try to find ganglion without it
+[error] failed to Open Ganglion Device 13      <- 즉시 실패
+```
+
+5.20.0 로그 (보드를 실제로 찾음):
+```
+[info]  mac address is not specified, try to find ganglion without it
+[info]  detected firmware version 2            <- 31.8초 스캔 후 보드 발견
+```
+
+핵심 차이:
+- 5.22.2 는 **0.0초**에 실패 → BLE 스캔 자체를 안 함. BLED112 경로가 사실상 죽어 있음.
+  (존재하지 않는 포트 COM99 로 시도해도 **똑같이 에러 13** → 포트를 보지도 않는다는 뜻)
+- 5.20.0 은 정상적으로 스캔하고 **보드의 펌웨어 버전 2를 읽어냄**
+
+`other_info='fw:2'` 로 펌웨어를 강제해도 5.22.2 에서는 해결되지 않음 (확인함).
+
+**부수 조건**: 5.20.0 은 `pkg_resources` 를 쓰므로 `setuptools<81` 이 함께 필요하다
+(setuptools 81 에서 `pkg_resources` 제거됨). requirements.txt 에 명시되어 있음.
+
+노트북 1단계 셀이 버전을 확인해 자동으로 맞춰 설치한다.
 
 ### mac_address 관련
 
@@ -154,8 +186,35 @@ Microsoft Store 版 Python 3.13에서 `pip install`이 `Cannot import 'setuptool
 1. **Cyton 드라이버를 Ganglion에 적용하려 함** — `open_bci_v3.py`(OpenBCI_LSL 소속)는 Cyton 전용 시리얼 파서. Ganglion은 BLE라 프로토콜 자체가 다름. 폐기함.
 2. **`bleak`로 네이티브 BLE 시도** — PC에 BLE 어댑터가 없고, 애초에 BLED112는 네이티브 BLE가 아니라 동글 뒤의 가상 시리얼 포트. 폐기함.
 3. **8채널·250Hz로 가정** — Ganglion은 4채널·200Hz.
+4. **brainflow 최신 버전 사용** — 5.22.2 는 BLED112 지원이 죽어 있어 연결 불가. 5.20.0 고정 필수.
+5. **"MAC 주소를 몰라서 연결이 안 된다"고 판단** — 실제 원인은 라이브러리 버전이었음.
+   BLED112 방식은 MAC 이 원래 선택 사항이라, 자동 탐색 실패는 대개 다른 원인이다.
+6. **노트북 편집 스크립트에서 `source` 를 리스트로 가정** — nbformat 의 `source` 는
+   리스트일 수도 문자열일 수도 있다. 문자열을 for 로 돌리면 글자 단위로 쪼개져 파일이 깨진다.
+   반드시 `''.join(s) if isinstance(s, list) else s` 로 정규화할 것.
 
-교훈: 보드 모델을 먼저 확정하고, 채널 수와 샘플링 레이트는 `BoardShim.get_*()`로 코드에서 조회할 것. 하드코딩 금지.
+교훈:
+- 보드 모델을 먼저 확정하고, 채널 수와 샘플링 레이트는 `BoardShim.get_*()`로 조회. 하드코딩 금지.
+- 연결 실패는 **실패까지 걸린 시간**이 가장 중요한 단서다.
+  0초 실패 = 라이브러리/포트 문제, 타임아웃까지 걸림 = 실제로 스캔했으나 못 찾음.
+- 가설을 세웠으면 **버전을 바꿔가며 실제로 돌려서** 확인할 것.
+
+## 진단 도구
+
+노트북 **5-A단계** 셀: BrainFlow 내부 로그를 파일로 받아
+- 발견된 BLE 장치의 MAC 주소를 정규식으로 추출
+- 로그 마지막 30줄 출력 (에러 코드로 원인 특정)
+
+수동 진단 명령:
+```powershell
+# COM 포트 점유 여부
+python -c "import serial; s=serial.Serial('COM3',115200,timeout=1); print('비어있음'); s.close()"
+
+# OpenBCI GUI(javaw) 가 살아있는지
+Get-Process | Where-Object { $_.ProcessName -match 'javaw|openbci' }
+```
+
+BLED112 동글의 하드웨어 ID: `USB VID:PID=2458:0001` (2458 = Bluegiga)
 
 ---
 
