@@ -95,16 +95,55 @@ CHS = BoardShim.get_eeg_channels(BoardIds.GANGLION_BOARD)    # EEG 행 인덱스
 
 **부수 조건**: 5.20.0 은 `pkg_resources` 를 쓰므로 `setuptools<81` 이 함께 필요하다
 (setuptools 81 에서 `pkg_resources` 제거됨). requirements.txt 에 명시되어 있음.
+단, setuptools 83 에서도 `pkg_resources` 는 경고만 내고 아직 동작하므로,
+노트북은 `import pkg_resources` 가 실패할 때만 다운그레이드한다.
 
-노트북 1단계 셀이 버전을 확인해 자동으로 맞춰 설치한다.
+### 🔴 버전을 바꿨으면 커널 재시작 — 디스크 버전만 봐선 안 된다
+
+**DLL 은 한 번 프로세스에 로드되면 파일을 교체해도 메모리 안에서는 바뀌지 않는다.**
+
+이것 때문에 실제로 오래 헤맸다. 상황:
+- 디스크: 5.20.0 (pip 설치 완료)
+- 커널: 5.22.2 를 메모리에 보유 (설치 전에 시작된 프로세스)
+- `importlib.metadata.version('brainflow')` → **5.20.0** 이라고 답함 (디스크만 봄)
+- 결과: "5.20.0 준비 완료" 라고 표시되면서 **0초 만에 연결 실패**
+
+해결: **`BoardShim.get_version()`** 이 실제 로드된 네이티브 라이브러리 버전을 반환한다.
+
+```python
+from importlib.metadata import version as pkg_version
+pkg_version('brainflow')     # 디스크에 설치된 버전
+BoardShim.get_version()      # 실제 메모리에 로드된 DLL 버전  <- 이걸 봐야 함
+```
+
+노트북 1단계 셀은 두 값을 모두 확인하고, 불일치하면 커널 재시작을 안내하며 중단한다.
+최종 출력에도 `(실제 로드된 버전)` 이라고 명시한다.
+
+**진단 팁**: 프로세스 시작 시각과 pip 설치 시각을 비교하면 확실하다.
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
+  Select-Object Id, ProcessName, @{N='시작';E={$_.StartTime.ToString('HH:mm:ss')}}
+```
+프로세스 시작이 설치보다 앞서면 그 커널은 옛 DLL 을 쓰고 있다.
+
+또한 커널이 DLL 을 잡고 있으면 pip 가 파일을 지우지 못해
+`WARNING: Failed to remove contents in a temporary directory '...\~rainflow'` 가 뜬다.
+이 경고가 보이면 설치가 불완전할 수 있으니 커널을 끄고 재설치할 것.
 
 ### mac_address 관련
 
 - 비우면 → BrainFlow가 자동 탐색. **주변에 Ganglion이 하나일 때만 안전.**
 - **강의실처럼 여러 보드가 켜져 있으면 반드시 지정.** 안 그러면 옆 사람 보드에 붙음.
 - GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`d2:b4:11:81:48:ad` 형태). 서로 다름.
-- MAC 찾는 법 (Windows): Microsoft Store의 **Bluetooth LE Explorer** 앱으로 스캔.
 - BrainFlow 소스(`ganglion.cpp`)는 이 문자열을 검증 없이 GanglionLib에 그대로 전달함.
+
+MAC 찾는 방법 세 가지:
+
+| 방법 | 준비물 | 비고 |
+| --- | --- | --- |
+| **노트북 5-A 진단 셀** | 없음 | ⭐ 동글 로그에서 정규식으로 추출. 추가 도구 불필요 |
+| Bluetooth LE Explorer | Windows | Microsoft Store 앱 |
+| nRF Connect for Mobile | **안드로이드** | iOS 는 불가 — 개인정보 정책상 무작위 UUID 만 표시 |
 
 ---
 
@@ -115,8 +154,11 @@ openbci-bled112/
 ├── src/
 │   ├── Ganglion_Tutorial.ipynb    ← ⭐ 실습의 전부. 이것만 쓰면 됨
 │   └── _deprecated_cyton/         ← 폐기 (Cyton/BLE 기반, 동작 안 함)
+│       └── README.md              ← 각 파일이 왜 폐기됐는지
 ├── outputs/                       ← CSV·그림 (git 제외)
-├── requirements.txt
+├── README.md                      ← 학생/사용자용 문서
+├── requirements.txt               ← brainflow==5.20.0 고정 (이유 주석 포함)
+├── .gitignore                     ← outputs/, brainflow_debug.log 제외
 └── .claude/openbci-bled112.md     ← 이 문서
 ```
 
@@ -129,11 +171,12 @@ openbci-bled112/
 
 | 단계 | 내용 |
 | --- | --- |
-| 1 | 라이브러리 (brainflow 자동 설치 포함) |
+| 1 | 라이브러리 + **brainflow 버전 확인/자동 설치 + 커널 재시작 감지** |
 | 2 | COM 포트 탐색 |
 | 3 | **설정 — 학생이 고치는 유일한 셀** (`COM_PORT`, `BOARD_MAC`, `DURATION_SEC`) |
 | 4 | 보드 사양 확인 (연결 없이) + MAC 찾는 법 안내 |
-| 5 | `prepare_session()` 연결 |
+| 5 | `prepare_session()` 연결 — **최대 3회 자동 재시도, timeout 40초** |
+| **5-A** | **연결 진단 (실패 시에만)** — 로그에서 MAC 추출 + 원인 파악 |
 | 6 | 스트리밍 + 진행 표시 |
 | 7 | DataFrame 변환 |
 | 8 | 원본 신호 플롯 (필터가 왜 필요한지 보여줌) |
@@ -168,16 +211,34 @@ jupyter notebook src/Ganglion_Tutorial.ipynb
 
 | 증상 | 원인 |
 | --- | --- |
+| **0초 만에** 연결 실패 | brainflow 버전 문제. 디스크 5.20.0 이어도 **커널 재시작 안 했으면 동일 증상** |
+| 오래 기다리다 실패 | 실제로 스캔했으나 못 찾음 → 보드 전원 / 배터리 |
 | 연결 실패 | **OpenBCI GUI가 동글을 점유 중** — 압도적으로 흔한 원인 |
 | 샘플 0개 | 보드 전원 / 배터리 / 전극 |
 | 엉뚱한 보드 연결 | `BOARD_MAC` 미지정 상태에서 여러 보드가 켜져 있음 |
 | 다음 실행이 안 됨 | 14단계 `release_session()` 누락 → 커널 재시작으로 해결 |
+| 노트북 수정이 안 보임 | Jupyter 는 디스크 변경을 자동 반영하지 않음 → 탭 닫았다 다시 열기 |
+
+> ⚠️ 외부에서 .ipynb 를 수정한 뒤 사용자가 브라우저에서 저장하면 그 수정이 덮어써진다.
+> 파일을 고쳤으면 **반드시 "닫았다 다시 열라"고 안내할 것.**
 
 ### 환경 이슈 (해결됨)
 
-Microsoft Store 版 Python 3.13에서 `pip install`이 `Cannot import 'setuptools.build_meta'`로 실패.
-- 원인: requirements.txt에 고정된 구버전(`numpy==1.24.3` 등)이 3.13용 휠이 없어 소스 빌드를 시도
-- 해결: 버전 고정을 `>=`로 완화. 필요시 `pip install --no-build-isolation -r requirements.txt`
+**1) Microsoft Store 版 Python 3.13 에서 pip 실패**
+`Cannot import 'setuptools.build_meta'` 로 설치 불가.
+- 원인: 구버전 고정(`numpy==1.24.3` 등)이 3.13용 휠이 없어 소스 빌드를 시도
+- 해결: 일반 패키지는 `>=` 로 완화. 필요시 `pip install --no-build-isolation -r requirements.txt`
+- 단, **brainflow 만은 `==5.20.0` 으로 고정 유지** (위 참조)
+
+**2) 구버전 brainflow 는 Python 3.13 에서 설치 불가**
+5.12.1 이하는 `nptyping` 에 의존하고, `nptyping` 은 `np.compat`(numpy 2.x 에서 제거됨)을 쓴다.
+numpy 1.x 는 Python 3.13 휠이 없어 우회도 불가.
+→ **5.20.0 이 Python 3.13 + BLED112 조합에서 쓸 수 있는 하한선.**
+
+**3) 콘솔 인코딩**
+`µ` 기호가 Windows cp949 콘솔에서 `UnicodeEncodeError` 를 낸다.
+노트북 1단계에서 `sys.stdout.reconfigure(encoding='utf-8')` 로 해결
+(워크스페이스 `conventions.md` 규칙).
 
 ---
 
@@ -192,6 +253,11 @@ Microsoft Store 版 Python 3.13에서 `pip install`이 `Cannot import 'setuptool
 6. **노트북 편집 스크립트에서 `source` 를 리스트로 가정** — nbformat 의 `source` 는
    리스트일 수도 문자열일 수도 있다. 문자열을 for 로 돌리면 글자 단위로 쪼개져 파일이 깨진다.
    반드시 `''.join(s) if isinstance(s, list) else s` 로 정규화할 것.
+   (문법 검사는 통과하므로 눈치채기 어렵다. 파일 크기가 2배로 뛰는 것이 신호.)
+7. **디스크 버전만 확인하고 "고쳤다"고 판단** — 커널에 로드된 DLL 이 그대로였다.
+   `BoardShim.get_version()` 으로 실제 로드된 버전을 봐야 한다.
+8. **`GANGLION_BOARD` deprecated 경고를 "경고일 뿐 동작은 정상"으로 해석** — 실제로는
+   기능이 죽어 있었다. deprecated 표시는 실제 동작 여부와 별개이므로 **직접 돌려서 확인**할 것.
 
 교훈:
 - 보드 모델을 먼저 확정하고, 채널 수와 샘플링 레이트는 `BoardShim.get_*()`로 조회. 하드코딩 금지.
