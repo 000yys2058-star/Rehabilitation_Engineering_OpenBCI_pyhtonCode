@@ -1,66 +1,78 @@
-# OpenBCI BLED112 Python 드라이버
+# OpenBCI Ganglion 실습 프로젝트
 
-## 프로젝트 개요
+*마지막 업데이트: 2026-07-23*
 
-BLED112 Bluetooth LE 동글을 통해 OpenBCI Cyton 보드에서 **실시간 뇌파(EEG) 신호를 수집**하는 완전한 Python 애플리케이션입니다.
+## 이 프로젝트가 뭔가
 
-**목적:** MATLAB 대신 Python으로 신경신호를 빠르고 효율적으로 처리
+UNIST **재활재생개론** 수업의 신경신호 실습 코드.
+학생들이 OpenBCI Ganglion 보드로 EEG/EMG를 직접 수집하고 처리해 보는 것이 목적.
 
----
+기존 MATLAB Live Script 실습(`F:\matlab code\2024\rehabilitation_Matlab\Rehabilitation1.mlx`, `Rehabilitation2.mlx`)을
+**파이썬 Jupyter Notebook**으로 옮긴 것. MATLAB이 느리고 쓸 수 있는 도구가 적다는 이유.
 
-## 기술 스택
-
-| 계층 | 기술 | 역할 |
-|------|------|------|
-| **통신** | bleak (BLE) | OpenBCI ↔ PC 비동기 통신 |
-| **신호 처리** | scipy, numpy | 필터링, 스펙트럼 분석, RMS |
-| **데이터 관리** | pandas | CSV/NumPy 저장 |
-| **시각화** | matplotlib | 실시간 파형 & 스펙트럼 플롯 |
+- GitHub: https://github.com/000yys2058-star/Rehabilitation_Engineering_OpenBCI_pyhtonCode
+- 로컬: `C:\Users\000yy\OneDrive\UNIST\Python\openbci-bled112\`
+- 원본 수업 자료: `C:\Users\000yy\OneDrive\UNIST\대학원\2024\재활재생개론\`
 
 ---
 
-## 아키텍처
+## ⚠️ 하드웨어 — 반드시 먼저 확인할 것
 
-```
-OpenBCI (UART) ← BLED112 동글 ← PC (BLE)
-                                  ↓
-                        bled112_openbci.py (연결 & 패킷 파싱)
-                                  ↓
-                        signal_processor.py (필터 & 분석)
-                                  ↓
-                        data_recorder.py (저장 & 시각화)
-                                  ↓
-                          outputs/ (CSV, PNG, NPY)
-```
+| 항목 | 값 |
+| --- | --- |
+| 보드 | **OpenBCI Ganglion** (Cyton 아님) |
+| EEG 채널 | **4개** |
+| 샘플링 레이트 | **200 Hz** |
+| 연결 | **BLED112 USB 동글** → COM3 |
+| 보드 식별 | BLE 광고 이름 `Ganglion-3587` 형태 |
+| PC 내장 BLE | **없음** (bleak가 "No Bluetooth adapter found" 반환) |
+
+> Cyton(8채널·250Hz)과 혼동하지 말 것. 사양이 다르면 필터 설계와 주파수 축이 전부 틀어짐.
 
 ---
 
-## 데이터 흐름
+## 유일하게 올바른 접근: BrainFlow
 
-### OpenBCI 패킷 구조 (33 바이트)
+OpenBCI GUI v5도 내부적으로 BrainFlow를 사용한다 (GUI 화면의 `BRAINFLOW STREAMER` 항목).
+직접 시리얼 프로토콜을 파싱하지 말고 BrainFlow에 맡길 것.
 
+```python
+from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
+
+params = BrainFlowInputParams()
+params.serial_port = 'COM3'    # BLED112 동글 포트 — 필수
+params.mac_address = ''        # 특정 보드 지정 — 선택, 비우면 자동탐색
+params.timeout     = 20        # 기본 15초
+
+board = BoardShim(BoardIds.GANGLION_BOARD, params)   # board_id = 1
+board.prepare_session()
+board.start_stream()
+# ...
+data = board.get_board_data()      # (행=채널, 열=시간)
+board.stop_stream()
+board.release_session()
+
+FS  = BoardShim.get_sampling_rate(BoardIds.GANGLION_BOARD)   # 200
+CHS = BoardShim.get_eeg_channels(BoardIds.GANGLION_BOARD)    # EEG 행 인덱스
 ```
-[0xA0] [PacketID] [Ch1:3B] ... [Ch8:3B] [AUX:3B] [0xC0]
- 1B      1B       24B          24B      6B       1B
-```
 
-- **샘플링 레이트:** 250Hz
-- **EEG 채널:** 8개
-- **AUX 채널:** 3개 (가속도계)
+### BoardIds 선택 기준
 
-### 신호 처리 파이프라인
+| BoardIds | 연결 방식 | 이 환경에서 |
+| --- | --- | --- |
+| `GANGLION_BOARD` (1) | BLED112 동글 + `serial_port` | ✅ **이걸 사용** |
+| `GANGLION_NATIVE_BOARD` (46) | PC 내장 BLE + `mac_address`/`serial_number` | ❌ 내장 BLE 없음 |
 
-```
-Raw EEG (µV) 
-    ↓
-Butterworth Filter (5-50Hz)  [선택사항]
-    ↓
-RMS 계산 (10개 샘플 버퍼)
-    ↓
-Welch 파워 스펙트럼 (Delta/Theta/Alpha/Beta/Gamma)
-    ↓
-임계값 감지 (이벤트 생성)
-```
+`GANGLION_BOARD`는 BrainFlow 5.21+ 에서 **문서상 deprecated**(BLED112 단종 때문)이지만
+**코드는 그대로 살아 있어 정상 동작**한다. 문서에서 안 보인다고 없어진 게 아님.
+
+### mac_address 관련
+
+- 비우면 → BrainFlow가 자동 탐색. **주변에 Ganglion이 하나일 때만 안전.**
+- **강의실처럼 여러 보드가 켜져 있으면 반드시 지정.** 안 그러면 옆 사람 보드에 붙음.
+- GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`d2:b4:11:81:48:ad` 형태). 서로 다름.
+- MAC 찾는 법 (Windows): Microsoft Store의 **Bluetooth LE Explorer** 앱으로 스캔.
+- BrainFlow 소스(`ganglion.cpp`)는 이 문자열을 검증 없이 GanglionLib에 그대로 전달함.
 
 ---
 
@@ -69,114 +81,87 @@ Welch 파워 스펙트럼 (Delta/Theta/Alpha/Beta/Gamma)
 ```
 openbci-bled112/
 ├── src/
-│   ├── bled112_openbci.py      ← BLE 드라이버 (코어)
-│   ├── signal_processor.py     ← 필터 & 분석
-│   ├── data_recorder.py        ← 저장 & 시각화
-│   └── main.py                 ← 통합 애플리케이션
-├── outputs/                    ← 데이터 & 그래프 (git 제외)
-├── README.md                   ← 사용자 가이드
-├── requirements.txt            ← 의존성
-└── .gitignore
+│   ├── Ganglion_Tutorial.ipynb    ← ⭐ 실습의 전부. 이것만 쓰면 됨
+│   └── _deprecated_cyton/         ← 폐기 (Cyton/BLE 기반, 동작 안 함)
+├── outputs/                       ← CSV·그림 (git 제외)
+├── requirements.txt
+└── .claude/openbci-bled112.md     ← 이 문서
 ```
 
----
-
-## 핵심 클래스
-
-### OpenBCIBLE
-- **책임:** BLE 연결 및 패킷 파싱
-- **주요 메서드:**
-  - `connect()` - BLED112 찾기 & 연결
-  - `start_stream(callback)` - 알림 수신 시작
-  - `stop_stream()` - 스트리밍 중지
-
-### SignalProcessor
-- **책임:** 실시간 신호 처리
-- **상태:**
-  - `buffers[ch]`: 채널별 순환 버퍼 (250 샘플)
-  - `filters[ch]`: 채널별 Butterworth IIR 필터
-- **주요 메서드:**
-  - `compute_rms()` - RMS 계산
-  - `get_band_power()` - 대역 파워 ('alpha', 'beta' 등)
-
-### DataRecorder
-- **책임:** 데이터 저장
-- **출력:** `outputs/OpenBCI_YYYYMMDD_HHMMSS.csv`
-
-### RealtimeVisualizer
-- **책임:** 시각화
-- **출력:** 채널 파형 & 파워 스펙트럼 PNG
+`Ganglion_Tutorial.ipynb`는 **자체 완결형**. 다른 .py 모듈에 의존하지 않는다.
+학생이 노트북 하나만 열면 끝나도록 의도한 설계.
 
 ---
 
-## 실행 예제
+## 노트북 구성 (14단계)
 
-### 1. 기본 스트리밍 (60초)
-```bash
-python src/main.py --record --duration 60
+| 단계 | 내용 |
+| --- | --- |
+| 1 | 라이브러리 (brainflow 자동 설치 포함) |
+| 2 | COM 포트 탐색 |
+| 3 | **설정 — 학생이 고치는 유일한 셀** (`COM_PORT`, `BOARD_MAC`, `DURATION_SEC`) |
+| 4 | 보드 사양 확인 (연결 없이) + MAC 찾는 법 안내 |
+| 5 | `prepare_session()` 연결 |
+| 6 | 스트리밍 + 진행 표시 |
+| 7 | DataFrame 변환 |
+| 8 | 원본 신호 플롯 (필터가 왜 필요한지 보여줌) |
+| 9 | 대역통과 + 60Hz 노치 필터 |
+| 10 | 필터 전후 비교 플롯 |
+| 11 | 구간별 RMS + 임계값 (MATLAB 실습의 서보 제어와 연결) |
+| 12 | Welch 파워 스펙트럼 + 대역별 비율 |
+| 13 | CSV 저장 |
+| 14 | `release_session()` — **안 하면 동글이 계속 점유됨** |
+
+교육 설계 원칙:
+- markdown 셀로 "왜 이걸 하는지" 먼저 설명 → 코드 셀
+- 학생이 값을 바꿔 재실행하도록 유도 (`🧪 해 볼 것` 블록)
+- 에러 메시지에 점검 목록을 함께 출력
+
+---
+
+## 실행 방법
+
+```powershell
+cd "C:\Users\000yy\OneDrive\UNIST\Python\openbci-bled112"
+pip install -r requirements.txt
+jupyter notebook src/Ganglion_Tutorial.ipynb
 ```
 
-### 2. 프로그래매틱 사용
-```python
-import asyncio
-from src.bled112_openbci import OpenBCIBLE
-from src.signal_processor import SignalProcessor
-
-async def main():
-    board = OpenBCIBLE()
-    processor = SignalProcessor(fs=250)
-    
-    def on_sample(sample):
-        processor.add_sample(sample.channel_data)
-        rms = processor.compute_rms(channel=0)
-        print(f"RMS: {rms:.2f} µV")
-    
-    await board.connect()
-    await board.start_stream(callback=on_sample)
-    await asyncio.sleep(10)
-    await board.stop_stream()
-    await board.disconnect()
-
-asyncio.run(main())
-```
+> **PowerShell 명령줄 방식은 교육용으로 부적합하다**는 것이 사용자의 명확한 요구.
+> 학생 대상 인터페이스는 Jupyter Notebook 하나로 통일할 것.
 
 ---
 
-## 중요 설계 결정
+## 자주 겪는 문제
 
-| 결정 | 이유 |
-|------|------|
-| **비동기 (async/await)** | 메인 스레드 블로킹 없이 실시간 통신 |
-| **Butterworth IIR 필터** | MATLAB과 호환, 저지연 (대역통과 5-50Hz) |
-| **순환 버퍼 (deque)** | 고정 메모리, 효율적인 슬라이딩 윈도우 |
-| **상대 경로 (__file__)** | 다른 PC/디렉토리에서도 동일하게 동작 |
+| 증상 | 원인 |
+| --- | --- |
+| 연결 실패 | **OpenBCI GUI가 동글을 점유 중** — 압도적으로 흔한 원인 |
+| 샘플 0개 | 보드 전원 / 배터리 / 전극 |
+| 엉뚱한 보드 연결 | `BOARD_MAC` 미지정 상태에서 여러 보드가 켜져 있음 |
+| 다음 실행이 안 됨 | 14단계 `release_session()` 누락 → 커널 재시작으로 해결 |
 
----
+### 환경 이슈 (해결됨)
 
-## 알려진 제한
-
-1. **동글 페어링:** BLED112이 OpenBCI와 미리 페어링되어야 함
-2. **패킷 손실:** 고부하 시 일부 패킷 손실 가능 (250Hz 샘플링 안정성 확보)
-3. **MATLAB 호환성:** 아직 LSL(Lab Streaming Layer) 미지원
+Microsoft Store 版 Python 3.13에서 `pip install`이 `Cannot import 'setuptools.build_meta'`로 실패.
+- 원인: requirements.txt에 고정된 구버전(`numpy==1.24.3` 등)이 3.13용 휠이 없어 소스 빌드를 시도
+- 해결: 버전 고정을 `>=`로 완화. 필요시 `pip install --no-build-isolation -r requirements.txt`
 
 ---
 
-## 향후 개선
+## 시행착오 기록 (같은 실수 반복 금지)
 
-- [ ] LSL 스트림 추가 (MATLAB/Brainflow 호환)
-- [ ] 머신러닝 분류 모듈 (손동작 인식)
-- [ ] WebSocket 대시보드
-- [ ] 멀티보드 동시 수집
+1. **Cyton 드라이버를 Ganglion에 적용하려 함** — `open_bci_v3.py`(OpenBCI_LSL 소속)는 Cyton 전용 시리얼 파서. Ganglion은 BLE라 프로토콜 자체가 다름. 폐기함.
+2. **`bleak`로 네이티브 BLE 시도** — PC에 BLE 어댑터가 없고, 애초에 BLED112는 네이티브 BLE가 아니라 동글 뒤의 가상 시리얼 포트. 폐기함.
+3. **8채널·250Hz로 가정** — Ganglion은 4채널·200Hz.
 
----
-
-## 환경
-
-- **OS:** Windows 10/11
-- **Python:** 3.7+
-- **하드웨어:** BLED112 동글 + OpenBCI Cyton 보드
+교훈: 보드 모델을 먼저 확정하고, 채널 수와 샘플링 레이트는 `BoardShim.get_*()`로 코드에서 조회할 것. 하드코딩 금지.
 
 ---
 
-**작성일:** 2026-07-23  
-**상태:** ✅ 완성 (기본 기능)
+## 다음에 할 만한 것
+
+- [ ] EMG + 아두이노 서보 제어 (MATLAB `파이썬 코드.txt` 실습의 파이썬 이식)
+- [ ] 실시간 스트리밍 버전 (현재는 수집 후 일괄 처리)
+- [ ] 손동작 분류 (머신러닝)
+- [ ] 보드별 MAC 주소 대조표를 노트북에 내장

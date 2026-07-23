@@ -1,222 +1,153 @@
-# OpenBCI BLED112 - Python BLE 드라이버
+# OpenBCI Ganglion 신경신호 실습
 
-BLED112 Bluetooth LE 동글을 통해 **OpenBCI Cyton 보드**에서 실시간 신경신호(EEG)를 수집하는 Python 라이브러리 및 애플리케이션입니다.
+UNIST **재활재생개론** 수업용 실습 코드.
+BLED112 동글로 OpenBCI Ganglion 보드에 연결해 신경신호(EEG/EMG)를 수집하고 처리합니다.
 
-**특징:**
-- ✅ **비동기 BLE 클라이언트** (bleak) - 안정적인 실시간 통신
-- ✅ **신호 처리** - Butterworth 필터, RMS, 파워 스펙트럼
-- ✅ **데이터 저장** - CSV, NumPy 포맷
-- ✅ **실시간 시각화** - 채널별 파형 및 스펙트럼
-- ✅ **이벤트 감지** - 임계값 기반 활성/비활성 감지
+MATLAB Live Script 실습을 **Jupyter Notebook**으로 옮긴 것으로,
+설명과 코드가 한 화면에 함께 있어 단계별로 따라가며 학습할 수 있습니다.
 
 ---
 
-## 설치
+## 준비물
 
-### 1. 의존성 설치
+- **OpenBCI Ganglion 보드** — 4채널 · 200 Hz
+- **BLED112 USB 동글**
+- Python 3.9 이상
 
-```bash
+---
+
+## 시작하기
+
+### 1. 설치
+
+```powershell
 pip install -r requirements.txt
 ```
 
-**주요 패키지:**
-- `bleak` (0.20.2+) - BLE 통신
-- `numpy`, `scipy` - 신호 처리
-- `pandas` - 데이터 관리
-- `matplotlib` - 시각화
+### 2. 노트북 실행
 
-### 2. BLED112 드라이버 설정 (Windows)
-
-1. BLED112 동글을 USB 포트에 연결 (예: COM3)
-2. Windows 드라이버는 자동 설치됨
-3. 장치 관리자에서 "Silicon Labs CP210x USB to UART Bridge" 확인
-
----
-
-## 빠른 시작
-
-### 기본 사용법
-
-```bash
-# 60초 데이터 수집 (CSV 저장)
-python src/main.py --record --duration 60
-
-# 커스텀 장치명 사용
-python src/main.py --device "OpenBCI-Cyton" --record --duration 120
+```powershell
+jupyter notebook src/Ganglion_Tutorial.ipynb
 ```
 
-### Python 코드에서 직접 사용
+브라우저가 열리면 **셀을 위에서 아래로** 하나씩 실행합니다 (`Shift + Enter`).
+
+### 3. 설정
+
+노트북 **3단계 셀**에서 세 가지만 고치면 됩니다.
 
 ```python
-import asyncio
-from src.bled112_openbci import OpenBCIBLE
-
-async def main():
-    board = OpenBCIBLE(device_name="OpenBCI-Cyton")
-    
-    def on_data(sample):
-        print(f"Ch1: {sample.channel_data[0]:.2f} µV")
-    
-    await board.connect()
-    await board.start_stream(callback=on_data)
-    
-    await asyncio.sleep(10)  # 10초 수집
-    
-    await board.stop_stream()
-    await board.disconnect()
-
-asyncio.run(main())
+COM_PORT     = 'COM3'      # 동글 포트 (2단계에서 확인)
+BOARD_MAC    = ''          # 연결할 보드 지정 (비우면 자동 탐색)
+DURATION_SEC = 10          # 수집 시간
 ```
+
+> ⚠️ **OpenBCI GUI는 반드시 종료하세요.** 동글은 한 번에 한 프로그램만 쓸 수 있습니다.
 
 ---
 
-## 모듈 설명
+## 실습 흐름
 
-### 1. `bled112_openbci.py` - BLE 드라이버
-OpenBCI 보드와의 Bluetooth Low Energy 통신을 담당합니다.
+```
+Ganglion 보드 ──BLE──> BLED112 동글 ──> BrainFlow ──> 행렬 (채널 × 시간)
+                                                          │
+                                                        필터
+                                                          │
+                                              ┌───────────┴───────────┐
+                                             RMS                  주파수 분석
+                                           (신호 세기)            (대역별 파워)
+                                              └───────────┬───────────┘
+                                                      CSV 저장
+```
 
-**주요 클래스:**
-- `OpenBCIBLE` - BLE 클라이언트
-  - `connect()` - 보드 연결
-  - `start_stream(callback)` - 스트리밍 시작
-  - `stop_stream()` - 스트리밍 중지
-  - `send_command(cmd)` - 명령 송신
-
-**데이터 구조:**
-- `Sample` - 단일 샘플
-  - `packet_id` (int) - 패킷 ID
-  - `channel_data` (List[float]) - 8개 EEG 채널 (µV)
-  - `aux_data` (List[float]) - 3개 AUX 채널 (가속도계)
-  - `timestamp` (float) - 수집 시간 (초)
-
-### 2. `signal_processor.py` - 신호 처리
-실시간 신경신호 필터링 및 분석을 수행합니다.
-
-**주요 클래스:**
-- `SignalProcessor` - 신호 처리
-  - `add_sample()` - 새 샘플 추가
-  - `compute_rms()` - RMS 계산
-  - `get_power_spectrum()` - 파워 스펙트럼
-  - `get_band_power()` - 대역 파워 ('alpha', 'beta', 등)
-
-- `ButterworthFilter` - IIR 필터
-  - 5-50Hz 대역통과 (기본값)
-
-- `ThresholdDetector` - 임계값 감지
-  - RMS 기반 이벤트 감지
-
-### 3. `data_recorder.py` - 데이터 저장
-신호를 파일로 저장하고 시각화합니다.
-
-**주요 클래스:**
-- `DataRecorder` - 데이터 기록
-  - `start_recording()` - 기록 시작
-  - `add_sample()` - 샘플 추가
-  - `stop_recording()` - 파일 저장
-  - `save_numpy()` - NumPy 형식 저장
-
-- `RealtimeVisualizer` - 시각화
-  - `plot_channels()` - 채널 파형 플롯
-  - `plot_spectrum()` - 파워 스펙트럼 플롯
-
-### 4. `main.py` - 메인 애플리케이션
-모든 기능을 통합한 완전한 데이터 수집 애플리케이션입니다.
+| 단계 | 내용 |
+| --- | --- |
+| 1–2 | 라이브러리 준비, COM 포트 찾기 |
+| 3–4 | 설정, 보드 사양 확인 |
+| 5–6 | 연결, 신호 수집 |
+| 7–8 | 표로 정리, 원본 신호 확인 |
+| 9–10 | 필터링, 전후 비교 |
+| 11 | RMS — 신호 세기 |
+| 12 | 주파수 분석 — Alpha/Beta 등 |
+| 13–14 | CSV 저장, 연결 해제 |
 
 ---
 
-## 데이터 포맷
+## 여러 보드를 동시에 쓸 때
 
-### CSV 출력 예시
+강의실처럼 Ganglion이 여러 대 켜져 있으면, `BOARD_MAC`을 비워 두면
+**옆 사람 보드에 연결될 수 있습니다.** 반드시 내 보드의 MAC 주소를 지정하세요.
 
-```
-timestamp,packet_id,EEG_Ch1,EEG_Ch2,...,EEG_Ch8,AUX_1,AUX_2,AUX_3
-0.00,0,12.34,45.67,...,-23.45,100,200,300
-0.004,1,12.45,45.78,...,-23.56,101,201,301
-...
-```
+**MAC 주소 찾는 법 (Windows)**
 
-### NumPy 출력 (shape: [samples, 8])
+1. Microsoft Store에서 **Bluetooth LE Explorer** 설치
+2. 실행 후 스캔 → 목록에서 `Ganglion-3587` 같은 이름을 찾기
+3. 옆에 표시된 MAC 주소(`d2:b4:11:81:48:ad` 형태)를 `BOARD_MAC`에 입력
+
+> OpenBCI GUI에 보이는 `Ganglion-3587`은 블루투스 **이름**이고,
+> `BOARD_MAC`이 요구하는 것은 **MAC 주소**입니다. 서로 다릅니다.
+
+---
+
+## 기술적 배경
+
+내부적으로 [BrainFlow](https://brainflow.readthedocs.io/)를 사용합니다.
+OpenBCI GUI v5도 같은 라이브러리를 쓰기 때문에 동작이 동일합니다.
+
 ```python
-data = np.load("OpenBCI_*.npy")
-# data[i, j] = i번째 샘플의 j번째 채널 값 (µV)
+params = BrainFlowInputParams()
+params.serial_port = 'COM3'    # 필수 — BLED112 동글 포트
+params.mac_address = ''        # 선택 — 특정 보드 지정
+board = BoardShim(BoardIds.GANGLION_BOARD, params)
+```
+
+| 파라미터 | 설명 |
+| --- | --- |
+| `serial_port` | **필수.** 동글이 꽂힌 COM 포트 |
+| `mac_address` | 선택. 비우면 자동 탐색 |
+| `timeout` | 선택. 기본 15초 |
+
+---
+
+## 문제 해결
+
+| 증상 | 확인할 것 |
+| --- | --- |
+| 연결 실패 | **OpenBCI GUI 종료** (가장 흔한 원인) |
+| 포트를 못 찾음 | 동글 다시 꽂고 2단계 재실행 |
+| 샘플 0개 | 보드 전원, 배터리, 전극 연결 |
+| 엉뚱한 보드 연결 | `BOARD_MAC` 지정 |
+| 다음 실행이 안 됨 | 14단계를 실행했는지 확인 → 커널 재시작 |
+| 신호가 온통 잡음 | 전극 접촉, 레퍼런스 전극 위치 |
+
+---
+
+## 폴더 구조
+
+```
+openbci-bled112/
+├── src/
+│   ├── Ganglion_Tutorial.ipynb    ← 실습 노트북
+│   └── _deprecated_cyton/         ← 사용하지 않음 (Cyton용, 보관만)
+├── outputs/                       ← 수집한 CSV·그림
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## 트러블슈팅
+## 과제 아이디어
 
-### 1. "장치를 찾을 수 없습니다"
+**기초**
+- 눈 감고 / 눈 뜨고 각 20초 수집 → Alpha 파워 비교
+- 필터 대역을 바꿔 가며 신호 변화 관찰
+- 노치 필터를 끄고 스펙트럼의 60Hz 부근 확인
 
-**원인:** BLED112이 OpenBCI와 페어링되지 않음
-
-**해결:**
-```bash
-# Windows 설정에서 Bluetooth 페어링 수동 진행
-# 또는 OpenBCI GUI에서 먼저 연결 테스트
-```
-
-### 2. "패킷 손실"
-
-**원인:** 높은 시스템 부하
-
-**해결:**
-- 다른 애플리케이션 종료
-- 샘플링 레이트 확인 (250Hz 유지)
-
-### 3. 한글 텍스트 깨짐
-
-**해결:** `matplotlib` 한글 폰트 설정
-```python
-import matplotlib.pyplot as plt
-plt.rcParams["font.family"] = "Malgun Gothic"  # Windows
-```
+**응용**
+- 팔 근육 EMG 측정 (`LOW=20, HIGH=95`) → 힘줄 때 RMS 변화
+- RMS 임계값으로 주먹 쥠/폄 자동 판정
+- 판정 결과로 아두이노 서보 모터 제어
 
 ---
 
-## 신호 처리 팁
-
-### Alpha 대역 파워 계산 (명상/휴식 상태)
-```python
-processor = SignalProcessor(fs=250)
-for sample in samples:
-    processor.add_sample(sample.channel_data)
-
-alpha = processor.get_band_power(channel=0, band_name='alpha')
-# alpha: 8-12Hz 대역 전력 (µV²)
-```
-
-### 실시간 RMS 기반 활성 감지
-```python
-detector = ThresholdDetector(threshold=15, min_duration=10)
-
-rms = processor.compute_rms(channel=0)
-event = detector.detect(rms)  # True: 시작, False: 종료, None: 상태 유지
-
-if event is True:
-    print("근육 활성!")
-elif event is False:
-    print("근육 이완")
-```
-
----
-
-## 향후 확장
-
-- [ ] MATLAB LSL 호환성 (Lab Streaming Layer)
-- [ ] 다중 채널 동시 분류 (머신러닝)
-- [ ] WebSocket 실시간 대시보드
-- [ ] 클라우드 데이터 업로드
-
----
-
-## 참고
-
-- [OpenBCI 공식 문서](https://docs.openbci.com/)
-- [bleak 라이브러리](https://bleak.readthedocs.io/)
-- [신호 처리 (scipy)](https://docs.scipy.org/doc/scipy/reference/signal.html)
-
----
-
-**마지막 업데이트:** 2026-07-23  
-**작성자:** Claude Code  
-**라이센스:** MIT
+*UNIST 재활재생개론 · 2026*
