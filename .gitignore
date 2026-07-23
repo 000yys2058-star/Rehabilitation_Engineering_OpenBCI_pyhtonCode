@@ -26,3 +26,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# BrainFlow 진단 로그
+brainflow_debug.log
