@@ -182,10 +182,39 @@ EEG 데이터까지 정상 수신됨:
 - **요즘 노트북은 대부분 BLE 가 있으므로 학생 PC 에서는 시험해 볼 가치가 큼**
 - 확인법: `python -c "import asyncio,bleak; asyncio.run(bleak.BleakScanner.discover())"`
 
-**2) BGAPI 로 자체 드라이버 구현 — 가능하지만 과함**
-이미 BGAPI 스캔은 동작하므로(`gap_discover`), `gap_connect_direct` 로 특정 MAC 에
-직접 연결하는 것도 원리상 가능하다. 다만 그 뒤 Ganglion 의 GATT 특성 구독과
-20바이트 델타압축 패킷 디코딩까지 직접 짜야 해서, 교육용 노트북에는 과한 작업이다.
+**2) BGAPI 자체 드라이버 — 절반은 이미 검증됨**
+
+`gap_connect_direct` 로 **특정 MAC 연결이 정확히 동작함을 확인했다** (2026-07-24):
+```
+connect_direct 응답: result=0x0000 handle=0
+connection_status: flags=0x05 peer=f6:83:23:ca:c1:29   <- 요청한 바로 그 보드
+```
+점유하면 해당 보드가 광고를 멈추는 것도 확인 (스캔에서 사라짐).
+
+**주의**: `gap_connect_direct` 의 supervision timeout 인자를 짧게 주면
+연결이 곧바로 끊긴다. `0x0064`(=1초)로 했더니 1초 만에 끊겼고,
+`0x0C80`(=32초)로 늘리니 20초 이상 안정 유지됨.
+payload: `addr[6] + atype[1] + struct.pack('<HHHH', int_min, int_max, timeout, latency)`
+
+남은 작업: GATT 특성 구독 + Ganglion 20바이트 델타압축 패킷 디코딩.
+
+### ❌ 실패한 우회책: 원치 않는 보드를 미리 점유하기
+
+"BrainFlow 가 MAC 을 무시하니, 다른 보드를 미리 점유해 광고를 멈추게 하면
+내 보드만 남는다"는 전략을 시험했으나 **실패**했다.
+
+```
+[1] 3587 점유 성공 -> 광고중: ['Ganglion-c57c'] 만 남음   (여기까지는 성공)
+[2] BrainFlow 연결 시도 -> 26.9초 실패
+[3] 확인 -> 3587 이 다시 광고 중 = 점유가 풀렸음
+```
+
+**원인**: BrainFlow 의 GanglionLib 이 포트를 열 때 동글을 리셋해 기존 연결을 모두 끊는다.
+따라서 BrainFlow 를 쓰는 한, 미리 만들어 둔 어떤 상태도 유지되지 않는다.
+
+### 이 PC 의 제약
+`Get-PnpDevice -Class Bluetooth` 결과 **블루투스 라디오가 아예 없음**.
+`GANGLION_NATIVE_BOARD` 경로는 이 PC 에서 검증 불가.
 
 - GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`f6:83:23:ca:c1:29` 형태). 서로 다름.
 - 이름은 스캔으로 확인 가능하지만 **연결 대상 선택에는 쓸 수 없다.**
