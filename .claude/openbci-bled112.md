@@ -334,6 +334,47 @@ openbci-bled112/
 두 노트북 모두 **자체 완결형**. 다른 .py 모듈에 의존하지 않는다.
 학생이 노트북 하나만 열면 끝나도록 의도한 설계.
 
+## 임피던스 측정 (1차시 5-B · 5-C)
+
+Ganglion 은 임피던스 측정을 지원한다. BrainFlow 보드 서술에 명시되어 있다:
+`resistance_channels: [8, 9, 10, 11, 12]` (채널 4개 + REF).
+
+```python
+board.config_board('z')    # 임피던스 모드 시작
+# 10초 이상 수집 - 값이 초당 1개 정도로 느리게 온다
+d = board.get_board_data()
+board.config_board('Z')    # 종료. EMG 스트리밍은 자동 복구됨 (실측 확인)
+kohm = median(d[row][d[row] > 0]) / 2.0
+```
+
+### 🔑 단위 환산: kΩ = 원시값 / 2
+
+OpenBCI GUI 화면과 파이썬 측정값을 대조해 확정했다 (2026-07-24):
+
+| 파이썬 원시값 | ÷2 | GUI 표시 |
+| --- | --- | --- |
+| 773 | 386.5 | Channel[0,1,2], Reference = 386.5 kΩ |
+| 959 | 479.5 | Channel[3] = 479.5 kΩ |
+
+GUI 소스(`OpenBCI_GUI.jar` → `W_GanglionImpedance.class`)를 역어셈블해
+`adjustedImpedance` 변수와 ` kΩ` 접미사, `idiv` 연산을 확인했다.
+상수 풀에 1000 같은 값이 없어 나눗셈 대상이 불분명했으나,
+정수를 그대로 표시하면 `.5` 가 나올 수 없다는 점 + 실측 대조로 `/2` 확정.
+
+### 판정 기준
+10 kΩ 미만 좋음 / 50 kΩ 미만 보통 / 그 이상 나쁨.
+**전극 미부착 시 400 kΩ 안팎**(실측 386~479).
+REF 가 나쁘면 전 채널이 영향받으므로 따로 경고한다.
+
+### 5-C 전극 비교 실험
+GUI 에는 임피던스 저장 기능이 없다. 이 노트북은 임피던스 + 잡음 RMS +
+60Hz 비율을 `outputs/electrode_comparison.csv` 에 누적하고,
+2종류 이상 쌓이면 비교 막대그래프를 그린다.
+사용자 요구: "전극 종류에 따라 달라지는 임피던스, 신호 퀄리티 차이를 보여줘야 한다".
+
+**주의**: `measure_impedance()` 는 5-B 셀에서 정의된다. 5-C 는 이를 재사용하므로
+5-B 를 먼저 실행해야 한다 (건너뛰면 안내 후 중단하도록 가드를 넣어 둠).
+
 ## 2차시: 실시간 손동작 분류 (Ganglion_Tutorial_2_Classification.ipynb)
 
 원본: MATLAB `F:\matlab code\2024\rehabilitation_Matlab\Randomforest_code.m`,
