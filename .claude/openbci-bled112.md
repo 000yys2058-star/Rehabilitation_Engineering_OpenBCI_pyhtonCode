@@ -130,11 +130,40 @@ Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
 `WARNING: Failed to remove contents in a temporary directory '...\~rainflow'` 가 뜬다.
 이 경고가 보이면 설치가 불완전할 수 있으니 커널을 끄고 재설치할 것.
 
-### mac_address 관련
+### 🔴 mac_address 는 BLED112 경로에서 무시된다 (2026-07-24 실측)
 
-- 비우면 → BrainFlow가 자동 탐색. **주변에 Ganglion이 하나일 때만 안전.**
-- **강의실처럼 여러 보드가 켜져 있으면 반드시 지정.** 안 그러면 옆 사람 보드에 붙음.
-- GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`d2:b4:11:81:48:ad` 형태). 서로 다름.
+**`params.mac_address` 를 지정해도 보드가 선택되지 않는다.** 값을 받아 로그에
+`search for <MAC>` 을 찍지만 실제 필터링에 쓰지 않고, 먼저 응답한 보드에 연결한다.
+
+보드 2대를 켜고 검증한 결과:
+
+| 지정 MAC | 결과 |
+| --- | --- |
+| `f6:83:23:ca:c1:29` (실제 보드 A = Ganglion-3587) | 1.5초 연결 |
+| `c5:cf:b4:83:e8:c6` (실제 보드 B = Ganglion-c57c) | 1.7초 연결 |
+| `11:22:33:44:55:66` (**존재하지 않는 가짜**) | **1.5초 연결** ← 결정적 증거 |
+
+로그:
+```
+[info] search for 11:22:33:44:55:66
+[info] detected firmware version 2      <- 가짜 MAC 인데 그냥 연결
+```
+
+**따라서 강의실 다중 보드 문제는 MAC 으로 해결할 수 없다.**
+
+실제로 통하는 대안 (노트북에 반영됨):
+1. **내 보드만 켠다** — 가장 확실
+2. **한 대씩 순서대로 연결** — BLE 보드는 연결되면 광고를 멈추므로 다음 사람에게 안 잡힘
+   (동글이 1개뿐이라 "연결 시 광고 중단"은 직접 검증 못 함. BLE 표준 동작에 근거)
+3. **연결 후 힘줘서 신호 반응 확인** — 남의 보드면 반응이 없다.
+   2차시 5단계(실시간 신호 확인)가 이 역할을 겸함
+
+미검증 대안: 노트북에 내장 BLE 가 있는 학생은 `GANGLION_NATIVE_BOARD` +
+`mac_address`/`serial_number` 를 쓰면 선택이 될 가능성이 있음
+(이 PC 에는 내장 BLE 가 없어 확인 불가).
+
+- GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`f6:83:23:ca:c1:29` 형태). 서로 다름.
+- 이름은 스캔으로 확인 가능하지만 **연결 대상 선택에는 쓸 수 없다.**
 - BrainFlow 소스(`ganglion.cpp`)는 이 문자열을 검증 없이 GanglionLib에 그대로 전달함.
 
 ### ⚠️ BrainFlow 로그에는 MAC 이 찍히지 않는다 (2026-07-24 확인)
@@ -164,12 +193,17 @@ BGAPI 패킷: 헤더 4바이트 `[type|tech|len_hi][len_lo][class][method]` + pa
 
 **주의**: BrainFlow 세션이 열려 있으면 동글이 점유되어 스캔 실패. 연결 해제 후 실행할 것.
 
-**강의실 다중 보드 해법**: RSSI 는 0에 가까울수록 가까운 보드.
-내 보드를 동글 옆에 바짝 붙이고 스캔하면 가장 강한 신호가 내 것.
-셀이 자동으로 최강 신호 보드의 MAC 을 `BOARD_MAC = '...'` 형태로 출력한다.
+**스캐너의 용도**: 주변에 Ganglion 이 몇 대 켜져 있는지 파악하는 것.
+1대면 자동 탐색이 안전, 여러 대면 순차 연결 절차를 따르라고 안내한다.
+**MAC 을 얻어도 연결 대상 선택에는 쓸 수 없다** (위 참조).
 
-검증 (2026-07-24): 주변 BLE 장치 27~31개를 MAC/이름/RSSI 와 함께 정상 수집.
-(Ganglion 0개 — 당시 보드 전원 OFF. **실제 Ganglion 이 목록에 뜨는지는 미검증.**)
+검증 (2026-07-24, 보드 2대 ON):
+```
+  -58 dBm   f6:83:23:ca:c1:29   'Ganglion-3587'
+  -69 dBm   c5:cf:b4:83:e8:c6   'Ganglion-c57c'
+```
+이름·MAC·RSSI 모두 정상 수집. 이름 필터(`'gang' in name.lower()`)도 정확히 동작.
+주변 BLE 장치 총 28개 중 Ganglion 2개를 정확히 골라냄.
 
 외부 도구 대안: Bluetooth LE Explorer(Windows Store),
 nRF Connect(**안드로이드만** — iOS 는 개인정보 정책상 무작위 UUID 만 표시).
