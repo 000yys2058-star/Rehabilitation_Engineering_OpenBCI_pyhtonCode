@@ -4,8 +4,33 @@
 
 ## 이 프로젝트가 뭔가
 
-UNIST **재활재생개론** 수업의 신경신호 실습 코드.
-학생들이 OpenBCI Ganglion 보드로 EEG/EMG를 직접 수집하고 처리해 보는 것이 목적.
+UNIST **재활재생개론** 수업의 **근전도(EMG)** 실습 코드.
+학생들이 OpenBCI Ganglion 보드로 팔 근육의 EMG 를 직접 수집·처리해 보는 것이 목적.
+
+### 🔴 이 프로젝트는 EMG 전용이다 (2026-07-24 확정)
+
+사용자가 명시적으로 정한 범위. **뇌파(EEG)는 다루지 않는다.**
+같은 보드로 뇌파도 측정 가능하지만, 전극 위치와 관심 주파수가 완전히 다르다.
+
+따라서 다음을 지킬 것:
+
+| 항목 | EMG 기준 |
+| --- | --- |
+| 전극 위치 | **팔뚝 근육** (두피 아님). 기준 전극은 뼈 위 |
+| 대역통과 | **20–95 Hz** (1차시) / **30–95 Hz** (2차시 손동작 분류) |
+| 노치 | 60 Hz (한국 전원) |
+| 시간영역 지표 | **RMS** — 근육 활동량 |
+| 주파수영역 지표 | **MDF(중앙주파수) · MNF(평균주파수)** — 근피로. 피로하면 내려감 |
+| 쓰지 말 것 | Delta/Theta/Alpha/Beta/Gamma 대역, 눈 감기 Alpha 실험 등 **EEG 개념 일체** |
+
+**나이퀴스트 한계를 반드시 언급할 것**: EMG 는 450 Hz 까지 성분이 있으나
+200 Hz 샘플링에서는 100 Hz 까지만 볼 수 있다. 에너지가 몰린 50~150 Hz 의
+위쪽 절반을 못 본다. RMS 기반 용도에는 충분하지만, MDF/MNF 절대값은
+실제보다 낮게 나오므로 논문 값과 직접 비교하면 안 된다.
+
+**변수명**: BrainFlow 는 `get_eeg_channels()` 로 생체전위 채널을 통칭한다.
+API 호출은 그대로 두되, 지역 변수는 `EMG_CHANNELS` / `EMG_CH` 로 쓰고
+"이 채널을 EMG 에 사용한다"는 주석을 붙일 것.
 
 기존 MATLAB Live Script 실습(`F:\matlab code\2024\rehabilitation_Matlab\Rehabilitation1.mlx`, `Rehabilitation2.mlx`)을
 **파이썬 Jupyter Notebook**으로 옮긴 것. MATLAB이 느리고 쓸 수 있는 도구가 적다는 이유.
@@ -24,7 +49,7 @@ UNIST **재활재생개론** 수업의 신경신호 실습 코드.
 | EEG 채널 | **4개** |
 | 샘플링 레이트 | **200 Hz** |
 | 연결 | **BLED112 USB 동글** → COM3 |
-| 보드 식별 | BLE 광고 이름 `Ganglion-3587` 형태 |
+| 보드 식별 | BLE 광고명(advertised name) `Ganglion-3587` 형태 |
 | PC 내장 BLE | **없음** (bleak가 "No Bluetooth adapter found" 반환) |
 
 > Cyton(8채널·250Hz)과 혼동하지 말 것. 사양이 다르면 필터 설계와 주파수 축이 전부 틀어짐.
