@@ -143,11 +143,26 @@ Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
 | `c5:cf:b4:83:e8:c6` (실제 보드 B = Ganglion-c57c) | 1.7초 연결 |
 | `11:22:33:44:55:66` (**존재하지 않는 가짜**) | **1.5초 연결** ← 결정적 증거 |
 
-로그:
+**결정적 증거** — 주변에 실재하는 **청소기**의 MAC 을 요청했더니 Ganglion 에 연결되어
+EEG 데이터까지 정상 수신됨:
 ```
-[info] search for 11:22:33:44:55:66
-[info] detected firmware version 2      <- 가짜 MAC 인데 그냥 연결
+[info] search for bc:10:2f:e3:eb:38   <- 청소기(vacuum) 의 MAC
+[info] detected firmware version 2     <- Ganglion 에 연결
+수신 데이터 (15, 309)
 ```
+
+### 검증 시 주의 — 오판하기 쉬움
+
+중간에 "MAC 필터링이 동작한다"고 잘못 결론냈다가 번복했다. 원인:
+**Ganglion 이 일시적으로 응답하지 않으면 26초 타임아웃으로 실패**하는데,
+이것을 "MAC 이 안 맞아서 거부됐다"고 오해하기 쉽다.
+
+구분법:
+- **1.5초 연결** = 아무 보드에나 붙음 (MAC 무시)
+- **26초 실패** = 보드를 못 찾음 (MAC 과 무관, 보드 상태 문제)
+
+가짜 MAC 을 여러 번, 동글 하드리셋(BGAPI system_reset) + 새 프로세스로
+반복 시험해야 확실하다. 한 프로세스 안에서 연속 시도하면 상태가 섞인다.
 
 **따라서 강의실 다중 보드 문제는 MAC 으로 해결할 수 없다.**
 
@@ -158,9 +173,19 @@ Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
 3. **연결 후 힘줘서 신호 반응 확인** — 남의 보드면 반응이 없다.
    2차시 5단계(실시간 신호 확인)가 이 역할을 겸함
 
-미검증 대안: 노트북에 내장 BLE 가 있는 학생은 `GANGLION_NATIVE_BOARD` +
-`mac_address`/`serial_number` 를 쓰면 선택이 될 가능성이 있음
-(이 PC 에는 내장 BLE 가 없어 확인 불가).
+### 보드 선택이 정말 필요하면 — 남은 두 가지 길
+
+**1) `GANGLION_NATIVE_BOARD` (내장 BLE) — 가장 유망, 미검증**
+동글 없이 PC 내장 블루투스로 직접 연결하는 경로. 이쪽은 `mac_address` / `serial_number`
+가 문서상 정식 파라미터이고, BLED112 의 레거시 GanglionLib 을 거치지 않는다.
+- 이 PC 는 내장 BLE 가 없어 확인 불가 (bleak: "No Bluetooth adapter found")
+- **요즘 노트북은 대부분 BLE 가 있으므로 학생 PC 에서는 시험해 볼 가치가 큼**
+- 확인법: `python -c "import asyncio,bleak; asyncio.run(bleak.BleakScanner.discover())"`
+
+**2) BGAPI 로 자체 드라이버 구현 — 가능하지만 과함**
+이미 BGAPI 스캔은 동작하므로(`gap_discover`), `gap_connect_direct` 로 특정 MAC 에
+직접 연결하는 것도 원리상 가능하다. 다만 그 뒤 Ganglion 의 GATT 특성 구독과
+20바이트 델타압축 패킷 디코딩까지 직접 짜야 해서, 교육용 노트북에는 과한 작업이다.
 
 - GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`f6:83:23:ca:c1:29` 형태). 서로 다름.
 - 이름은 스캔으로 확인 가능하지만 **연결 대상 선택에는 쓸 수 없다.**
