@@ -306,6 +306,34 @@ board = BoardShim(BoardIds.GANGLION_BOARD, params)
 | 힘을 줘도 신호가 안 변함 | 전극 밀착, 기준 전극이 뼈 위에 있는지 |
 | 신호가 온통 잡음 | 케이블 흔들림, 전극 접촉, 전원 어댑터 근처 회피 |
 | 노트북 수정이 반영 안 됨 | 브라우저에서 노트북을 닫았다 다시 열기 |
+| `PermissionError` / 포트를 열 수 없음 | **다른 커널이 COM 포트를 잡고 있음** (아래 참조) |
+
+### COM 포트를 열 수 없다고 나올 때
+
+```
+SerialException: could not open port 'COM3': PermissionError(13, ...)
+```
+
+**COM 포트는 한 번에 한 프로그램만 쓸 수 있습니다.** 누군가 이미 잡고 있다는 뜻입니다.
+
+가장 흔한 원인은 **예전 노트북 커널이 아직 살아있는 것**입니다.
+14단계(연결 해제)를 실행하지 않고 노트북을 닫으면 커널이 포트를 계속 붙들고 있습니다.
+
+| 확인 | 방법 |
+| --- | --- |
+| 예전 커널 | Jupyter 의 **Running(실행 중)** 목록 → 오래된 커널 `Shutdown` |
+| OpenBCI GUI | 창만 닫지 말고 작업관리자에서 `javaw` 까지 종료 |
+| 현재 노트북 | 이미 연결했다면 **14단계 연결 해제** 먼저 |
+
+지금 무엇이 잡고 있는지 확인:
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } | Select-Object Id, ProcessName, StartTime
+```
+
+시작 시각이 오래된 python 프로세스가 범인일 가능성이 높습니다.
+
+> 노트북의 「내 보드 확인」 셀이 이 상황을 감지해 원인과 해결법을 안내합니다.
 
 > 💡 **실패까지 걸린 시간이 가장 중요한 단서입니다.**
 > 0초면 라이브러리·포트 문제, 오래 걸리면 보드를 못 찾은 것입니다.

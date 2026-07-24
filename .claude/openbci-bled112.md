@@ -476,6 +476,22 @@ jupyter notebook src/Ganglion_Tutorial.ipynb
 > ⚠️ 외부에서 .ipynb 를 수정한 뒤 사용자가 브라우저에서 저장하면 그 수정이 덮어써진다.
 > 파일을 고쳤으면 **반드시 "닫았다 다시 열라"고 안내할 것.**
 
+### COM 포트 점유 (학생이 자주 겪음)
+
+`SerialException: PermissionError(13)` 은 포트를 다른 프로세스가 잡고 있다는 뜻.
+**가장 흔한 원인은 14단계(release_session)를 실행하지 않고 닫은 예전 Jupyter 커널.**
+
+진단:
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
+  Select-Object Id, ProcessName, StartTime
+```
+시작 시각이 오래된 python 프로세스를 의심할 것. Jupyter 의 Running 목록에서 Shutdown.
+
+노트북 「내 보드 확인」 셀은 `serial.SerialException` 을 잡아
+원인 3가지(예전 커널 / OpenBCI GUI / 현재 노트북 미해제)와 해결법을 출력하고,
+`SAFE_TO_CONNECT=False` 로 두어 연결 셀도 막는다. (2026-07-24 실제 점유 상태에서 검증)
+
 ### 환경 이슈 (해결됨)
 
 **1) Microsoft Store 版 Python 3.13 에서 pip 실패**
