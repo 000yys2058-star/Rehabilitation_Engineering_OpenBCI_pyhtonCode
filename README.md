@@ -171,12 +171,31 @@ board = BoardShim(BoardIds.GANGLION_BOARD, params)
 ```
 openbci-bled112/
 ├── src/
-│   ├── Ganglion_Tutorial.ipynb    ← 실습 노트북
-│   └── _deprecated_cyton/         ← 사용하지 않음 (Cyton용, 보관만)
-├── outputs/                       ← 수집한 CSV·그림
+│   ├── Ganglion_Tutorial.ipynb                  ← 1차시: 신호 수집·처리
+│   ├── Ganglion_Tutorial_2_Classification.ipynb ← 2차시: 실시간 손동작 분류
+│   └── _deprecated_cyton/                        ← 사용하지 않음 (Cyton용, 보관만)
+├── outputs/                       ← 수집한 CSV·그림·모델(.joblib)
 ├── requirements.txt
 └── README.md
 ```
+
+## 2차시 · 실시간 손동작 분류
+
+`Ganglion_Tutorial_2_Classification.ipynb` — 팔뚝 EMG로 **가위·바위·보를 실시간 판별**합니다.
+
+```
+팔 근육 EMG → 필터(30-95Hz) → 특징 추출(포락선 평균)
+   → 캘리브레이션(동작×40회) → Random Forest → 모델 저장 → 실시간 판정
+```
+
+1차시(EEG, 신호를 **본다**)와 달리 2차시는 EMG로 신호를 **판단**합니다.
+`scikit-learn` 이 추가로 필요하며 `requirements.txt` 에 포함되어 있습니다.
+
+**핵심 설계**
+- 학습한 모델을 `joblib` 로 저장 → 다음 주에 불러와 비교 (전극 위치·개인차 실험)
+- 시간순 분할로 정직하게 평가 (무작위 분할은 이웃 샘플 누수로 과대평가)
+- 최근 5회 예측 다수결로 실시간 판정 안정화
+- **관문 2곳**: 실시간 신호 확인(5단계), 활성 지문 확인(8단계) — 여기서 전극 문제를 미리 걸러냄
 
 ---
 
