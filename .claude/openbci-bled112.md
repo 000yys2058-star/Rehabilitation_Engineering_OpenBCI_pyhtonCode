@@ -137,13 +137,42 @@ Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
 - GUI에 보이는 `Ganglion-3587`은 **BLE 광고 이름**이고, `mac_address`는 **MAC 주소**(`d2:b4:11:81:48:ad` 형태). 서로 다름.
 - BrainFlow 소스(`ganglion.cpp`)는 이 문자열을 검증 없이 GanglionLib에 그대로 전달함.
 
-MAC 찾는 방법 세 가지:
+### ⚠️ BrainFlow 로그에는 MAC 이 찍히지 않는다 (2026-07-24 확인)
 
-| 방법 | 준비물 | 비고 |
-| --- | --- | --- |
-| **노트북 5-A 진단 셀** | 없음 | ⭐ 동글 로그에서 정규식으로 추출. 추가 도구 불필요 |
-| Bluetooth LE Explorer | Windows | Microsoft Store 앱 |
-| nRF Connect for Mobile | **안드로이드** | iOS 는 불가 — 개인정보 정책상 무작위 UUID 만 표시 |
+한때 "5-A 진단 셀이 로그에서 MAC 을 정규식으로 추출한다"고 만들었으나 **틀렸다.**
+BrainFlow 는 발견한 장치의 MAC 을 로그에 남기지 않는다. 실제 로그는 이게 전부다:
+```
+[info] mac address is not specified, try to find ganglion without it
+[info] detected firmware version 2      <- 보드를 찾아도 MAC 은 안 나옴
+```
+해당 셀은 시간 기반 진단으로 교체했다.
+
+### ✅ 해결: 동글에 BGAPI 를 직접 보내 스캔 (노트북 「내 보드 찾기」 셀)
+
+BLED112 는 Bluegiga BGAPI 를 쓰는 시리얼 장치다. pyserial 로 직접 명령을 보내면
+주변 BLE 장치의 **MAC + 이름 + RSSI** 를 얻을 수 있다. 외부 도구 불필요.
+
+BGAPI 패킷: 헤더 4바이트 `[type|tech|len_hi][len_lo][class][method]` + payload
+- `type`: 0x00 = command, 0x80 = event
+- GAP class = 0x06
+  - `gap_set_scan_parameters` method 0x07, payload 5B (interval2, window2, active1)
+  - `gap_discover` method 0x02, payload 1B (mode: 2 = observation)
+  - `gap_end_procedure` method 0x04, payload 없음
+  - `gap_scan_response` (event) method 0x00
+    payload: rssi(1) type(1) sender(6, **little-endian MAC**) addr_type(1) bond(1) data_len(1) data(가변)
+- 이름은 data 안의 AD 구조에서 타입 `0x08`(단축) / `0x09`(완전) 로 파싱
+
+**주의**: BrainFlow 세션이 열려 있으면 동글이 점유되어 스캔 실패. 연결 해제 후 실행할 것.
+
+**강의실 다중 보드 해법**: RSSI 는 0에 가까울수록 가까운 보드.
+내 보드를 동글 옆에 바짝 붙이고 스캔하면 가장 강한 신호가 내 것.
+셀이 자동으로 최강 신호 보드의 MAC 을 `BOARD_MAC = '...'` 형태로 출력한다.
+
+검증 (2026-07-24): 주변 BLE 장치 27~31개를 MAC/이름/RSSI 와 함께 정상 수집.
+(Ganglion 0개 — 당시 보드 전원 OFF. **실제 Ganglion 이 목록에 뜨는지는 미검증.**)
+
+외부 도구 대안: Bluetooth LE Explorer(Windows Store),
+nRF Connect(**안드로이드만** — iOS 는 개인정보 정책상 무작위 UUID 만 표시).
 
 ---
 
