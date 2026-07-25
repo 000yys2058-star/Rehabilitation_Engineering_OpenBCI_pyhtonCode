@@ -1,6 +1,9 @@
 # OpenBCI Ganglion 실습 프로젝트
 
-*마지막 업데이트: 2026-07-23*
+*마지막 업데이트: 2026-07-24*
+
+> 시간순 변경 이력·패치노트는 [`../CHANGELOG.md`](../CHANGELOG.md) 참조.
+> 이 문서는 "지금 어떻게 되어 있는지"의 기술 근거, CHANGELOG 는 "무엇을 왜 바꿨는지"의 흐름.
 
 ## 이 프로젝트가 뭔가
 
@@ -486,11 +489,18 @@ jupyter notebook src/Ganglion_Tutorial.ipynb
 Get-Process | Where-Object { $_.ProcessName -match 'python|javaw' } |
   Select-Object Id, ProcessName, StartTime
 ```
-시작 시각이 오래된 python 프로세스를 의심할 것. Jupyter 의 Running 목록에서 Shutdown.
+시작 시각이 오래된 python 프로세스를 의심할 것.
 
 노트북 「내 보드 확인」 셀은 `serial.SerialException` 을 잡아
-원인 3가지(예전 커널 / OpenBCI GUI / 현재 노트북 미해제)와 해결법을 출력하고,
+**PowerShell 로 현재 떠 있는 ipykernel/javaw 프로세스를 조회해 PID·시작시각과 함께 출력**하고,
+자기 자신의 PID 도 표시해 어느 것이 범인인지 바로 알 수 있게 한다.
 `SAFE_TO_CONNECT=False` 로 두어 연결 셀도 막는다. (2026-07-24 실제 점유 상태에서 검증)
+
+**⚠️ 사용자는 VS Code(ms-toolsai.jupyter)를 쓴다.** 브라우저 Jupyter 의 'Running 탭'
+안내는 통하지 않으므로, VS Code 기준(다른 노트북 탭 → Restart Kernel 또는 탭 닫기)을
+먼저 안내할 것. VS Code 는 노트북 파일마다 별도 커널을 띄우므로, 여러 노트북을 열어 두면
+커널이 여러 개 살아 있고 그중 하나가 포트를 붙들기 쉽다.
+(지난 세션에서 브라우저 Jupyter 기준으로만 안내해 사용자가 해결 못 한 사례 있음.)
 
 ### 환경 이슈 (해결됨)
 
