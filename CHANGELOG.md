@@ -6,6 +6,8 @@ OpenBCI Ganglion **근전도(EMG) 실습** 프로젝트의 개발 기록입니�
 
 - GitHub: https://github.com/000yys2058-star/Rehabilitation_Engineering_OpenBCI_pyhtonCode
 - 상세 기술 노트: [`.claude/openbci-bled112.md`](.claude/openbci-bled112.md)
+- 세션 작업 로그: [`.claude/session-log_2026-07-25_classification.md`](.claude/session-log_2026-07-25_classification.md)
+  — 분류 노트북·키보드 출력 구현 과정과 실패 기록
 - 대상: UNIST 재활재생개론 수업, OpenBCI Ganglion + BLED112 동글
 
 > 형식: 최신이 위. 각 항목은 날짜 · 요약 · 배경/근거 순.
@@ -25,6 +27,114 @@ OpenBCI Ganglion **근전도(EMG) 실습** 프로젝트의 개발 기록입니�
 | **나이퀴스트** | 200 Hz 샘플링 → **100 Hz 까지만** 표현. EMG 위쪽 절반은 못 봄 |
 | **에디터** | 사용자는 **VS Code** 사용 (브라우저 Jupyter 아님) |
 | **파일 편집 주의** | .ipynb 를 스크립트로 고쳐도, VS Code 에서 열려 있으면 저장 시 덮어써짐 → 닫았다 다시 열 것 |
+| **데이터 읽기** | 실시간 루프는 **`get_current_board_data(N)`**. `get_board_data()` 는 버퍼를 통째로 비우므로 루프에 쓰면 폭주 |
+| **COM 포트** | 새 PC 기준 **COM5** (BLED112, VID:PID 2458:0001). COM3/COM4 는 내장 Bluetooth SPP |
+
+---
+
+## [분류 테스트 노트북 · 키보드 출력] 2026-07-25 ~ 26
+
+### 새 파일: `src/Classification_convertSample.ipynb`
+
+2차시 노트북의 **축약 테스트판**. 설명 없이 동작만: 연결 → 캘리브레이션 →
+학습 → 실시간 판정 → **판정 결과를 키보드 입력으로 출력**.
+동작은 4개이며 라벨을 `1·2·3·4` 로 둔다(`GESTURES` 에서 이름만 변경).
+
+| 셀 | 내용 |
+| --- | --- |
+| 0 | 설정 + 필터 설계 + `extract_features` |
+| 1 | 보드 연결 (3회 재시도) |
+| 2 | 신호 확인 10초 |
+| 3 | 캘리브레이션 (동작당 40회, 진행바) |
+| 4 | Random Forest 학습 + 혼동행렬 |
+| 5 | 실시간 판정 (다수결 + 확률 막대 + 이력 그래프) |
+| 6-A | 키보드 출력 단독 테스트 |
+| 6 | 판정 → 키보드 입력 |
+| 7 | 연결 해제 |
+
+### 판정 결과 → 키보드 입력 (신규)
+
+0.5초마다 안정 판정을 내고 그 숫자를 **`SendInput` 으로 주입**한다.
+메모장을 포커스에 두면 거기에 `1`/`2`/`3`/`4` 가 찍힌다.
+
+- `ctypes` 로 user32 직접 호출 (추가 설치 없음)
+- **스캔코드** 사용 (`1`=0x02 … `4`=0x05) → 한/영 상태와 무관하게 숫자 입력
+- 안전장치: **ESC 즉시 중단**, `DURATION_SEC` 자동 종료,
+  **포커스 창 제목을 매 프레임 표시**(키가 어디로 가는지 눈으로 확인)
+- 옵션: `ONLY_ON_CHANGE`(판정 변화 시에만), `SEND_NEWLINE`, `KEY_MODE`(scan/vk)
+
+#### `SendInput` 이 조용히 실패한 원인 — `INPUT` 구조체 크기 (실측)
+
+`GetLastError=87 (ERROR_INVALID_PARAMETER)` 로 전부 실패했다.
+원인은 **union 크기를 `KEYBDINPUT` 기준으로 잡은 것**.
+
+`INPUT` 의 union 은 `MOUSEINPUT`/`KEYBDINPUT`/`HARDWAREINPUT` 중 **최대 크기**다.
+
+| 구조체 | x64 크기 |
+| --- | --- |
+| `MOUSEINPUT` | **32** ← 최대 |
+| `KEYBDINPUT` | 24 |
+| union | 32 |
+| **`INPUT`** | 4(type) + 4(패딩) + 32 = **40** |
+
+`KEYBDINPUT` + `padding[24]` 로 잡으면 `sizeof(INPUT)` 이 **32** 가 되고,
+이 값이 `cbSize` 로 들어가 Windows 가 거부한다. 세 구조체를 모두 정의해 해결.
+셀 상단에서 `sizeof(INPUT)` 을 출력해 40 인지 자가 검증한다.
+
+> 부수적으로 `SendInput.argtypes` 도 지정했다. 미지정이면 64비트에서
+> 포인터가 잘려 역시 실패한다. `restype` 을 받아 **반환값을 반드시 검사**할 것 —
+> 검사하지 않으면 "전송됨" 으로 보이지만 실제로는 아무것도 안 나간다.
+
+### 실시간 루프 폭주 — `get_board_data` vs `get_current_board_data`
+
+첫 구현이 초당 수천 줄을 쏟아내며 판정이 무의미했다.
+
+| 함수 | 동작 |
+| --- | --- |
+| `get_board_data(n)` | 버퍼에서 **꺼내고 지운다**. 쌓인 만큼 전부 나옴 |
+| `get_current_board_data(n)` | **최근 n 샘플만 훔쳐본다**. 버퍼 유지 |
+
+루프에서 `get_board_data(count)` 로 받아 다시 슬라이딩 윈도우를 돌리니
+같은 구간을 수백 번 재분류했다. → 2차시 원본대로
+`get_current_board_data(WINDOW_SAMPLES)` + `sleep(0.25)` 로 **프레임당 1회** 판정.
+
+### 특징·분류기를 2차시 원본에 맞춤
+
+임의로 RMS + 최근접 centroid 로 짰다가 되돌렸다. 원본 기준:
+
+| | 잘못 짠 것 | 원본(정답) |
+| --- | --- | --- |
+| 특징 | RMS | **Hilbert 포락선 평균** |
+| 분류기 | centroid 최근접 | **RandomForest** + `predict_proba` |
+| 대역통과 | 20–95 Hz | **30–95 Hz** (손동작용) |
+| 판정 | 매 샘플 raw | **최근 5회 다수결** |
+
+**교훈**: "참조해서 만들라"는 요청은 원본을 먼저 읽으라는 뜻이다.
+읽지 않고 새로 설계해 여러 번 되돌렸다.
+
+### 그 밖에 고친 것
+
+- **한글 폰트** — `font_manager` 로 `Malgun Gothic` 탐색·설정.
+  미설정 시 `Glyph ... missing from current font` 경고가 매 프레임 쏟아짐
+- **진행 표시** — `\r` 만으로는 Jupyter 에서 갱신이 안 되고 줄이 쌓임.
+  `IPython.display.clear_output(wait=True)` 로 교체
+- **`input()` 제거** — Jupyter 에서 입력 대기가 걸려 다음 동작으로 안 넘어감.
+  → 3·2·1 카운트다운 자동 진행
+- **`iirnotch(..., output='sos')` 없음** — `iirnotch` 는 `(b, a)` 만 반환.
+  대역통과는 sos(`sosfiltfilt`), 노치는 ba(`filtfilt`) 로 분리
+
+### 1차시 노트북(`Ganglion_Tutorial_V.1.1.ipynb`) 수정 — 같은 기간
+
+- **3단계 Data plot**: 스펙트로그램 → **원본 파형 + 단측 진폭 스펙트럼(FFT)**
+  - MATLAB `fft` 예제와 동일한 계산(`P1[1:-1] *= 2`), `np.fft.rfft` 사용
+  - 60 Hz 기준선 + EMG 대역(20–95 Hz) 음영, 60 Hz 대비 배율 표
+  - 200 Hz 샘플링이라 가로축은 **100 Hz 까지**
+- **1-5-C 전극 비교**: `EMG_CHANNELS` 미정의 시 `BoardShim.get_*()` 로 자동 보충
+  (1-4 를 건너뛰어도 실행되도록)
+- **NumPy 버전 호환**: `np.trapz`(1.x) ↔ `np.trapezoid`(2.0+) 이름 변경 대응
+  → `getattr(np, 'trapezoid', None) or getattr(np, 'trapz')`
+- **4-2 필터 전후 FFT 비교** 절 추가 — 60 Hz 진폭 감소율 표(70%+ 면 성공)
+- **RMS 플롯**: 0.25초 비겹침 창(점 40개) → **슬라이딩 윈도우**(샘플마다 계산)
 
 ---
 
@@ -182,7 +292,12 @@ deprecated 경고는 실제 동작 여부와 별개 → 직접 돌려서 확인.
 - [ ] 실제 전극으로 5-C 전극 비교 실험 검증(현재 모의 보드로만 검증)
 - [ ] 임피던스 판정 임계값(10/50 kΩ)을 실제 전극 상황에 맞게 조정
 - [ ] 2차시 실제 EMG 로 세 손동작이 구분되는지 검증(근육 없이는 불가)
+- [ ] **4동작 분류 정확도 개선** — 테스트 시 판정 확신도가 36~76%로 낮고 흔들림.
+  전극 위치 재배치 또는 특징 추가(포락선 평균 외 표준편차·최대값) 검토
+- [ ] `Classification_convertSample.ipynb` 의 키보드 출력을 정식 노트북에 반영할지 결정
+- [ ] `src/EMG_Classification_Live.py` — 노트북판으로 대체됨. 유지할지 삭제할지 결정
 - [ ] (선택) 3차시: 분류 결과로 아두이노 로봇 손 제어
+  (키보드 출력이 그 전 단계 프로토타입 역할)
 
 ---
 

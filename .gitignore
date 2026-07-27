@@ -29,3 +29,6 @@ Thumbs.db
 
 # BrainFlow 진단 로그
 brainflow_debug.log
+
+# Jupyter 자동저장 체크포인트
+.ipynb_checkpoints/
